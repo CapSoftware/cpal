@@ -102,3 +102,13 @@ fn windows_err_to_cpal_err_message<E: ErrDeviceNotAvailable>(
         }
     }
 }
+
+pub trait StreamInstantExt {
+    fn as_performance_counter(&self) -> i64;
+}
+
+impl StreamInstantExt for crate::StreamInstant {
+    fn as_performance_counter(&self) -> i64 {
+        (self.as_nanos() / 100) as i64
+    }
+}
