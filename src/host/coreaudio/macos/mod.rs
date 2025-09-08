@@ -950,3 +950,16 @@ fn get_io_buffer_frame_size_range(
         max: buffer_size_range.mMaximum as u32,
     })
 }
+
+pub trait StreamInstantExt {
+    fn as_host_time(&self) -> u64;
+}
+
+impl StreamInstantExt for crate::StreamInstant {
+    fn as_host_time(&self) -> u64 {
+        let mut info: mach2::mach_time::mach_timebase_info = Default::default();
+        unsafe { mach2::mach_time::mach_timebase_info(&mut info) };
+
+        (self.as_nanos() * info.denom as i128 / info.numer as i128) as u64
+    }
+}
