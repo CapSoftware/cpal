@@ -411,6 +411,19 @@ fn process_input(
 
             debug_assert!(!buffer.is_null());
 
+            // AUDCLNT_BUFFERFLAGS_SILENT means "treat this packet as
+            // silence"; the buffer contents are unspecified and may be stale
+            // garbage. Loopback capture of an idle render endpoint delivers
+            // such packets routinely, so surface real zeros to the callback.
+            let flags = flags.assume_init();
+            if flags & Audio::AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 {
+                ptr::write_bytes(
+                    buffer,
+                    0,
+                    frames_available as usize * stream.bytes_per_frame as usize,
+                );
+            }
+
             let data = buffer as *mut ();
             let len = frames_available as usize * stream.bytes_per_frame as usize
                 / stream.sample_format.sample_size();
