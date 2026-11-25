@@ -1078,7 +1078,10 @@ fn set_hw_params_from_format(
     match config.buffer_size {
         BufferSize::Fixed(v) => {
             hw_params.set_period_size_near((v / 4) as alsa::pcm::Frames, alsa::ValueOr::Nearest)?;
-            hw_params.set_buffer_size(v as alsa::pcm::Frames)?;
+            // The nearest size the device accepts: many cards take only some
+            // buffer sizes (multiples of a period or a byte alignment), and an
+            // exact size they cannot do fails the whole stream.
+            hw_params.set_buffer_size_near(v as alsa::pcm::Frames)?;
         }
         BufferSize::Default => {
             // These values together represent a moderate latency and wakeup interval.
