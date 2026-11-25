@@ -242,6 +242,19 @@ pub struct Device {
 }
 
 impl Device {
+    /// The ALSA PCM `pcm_id` (`"pulse"`, `"plughw:1"`, ...), opened only when
+    /// it is first queried or streamed. Unlike looking it up through
+    /// [`Devices`], which opens every PCM it lists, this touches no other
+    /// device: on a system whose `"default"` PCM is the sound card itself,
+    /// enumerating takes the card from the sound server for a moment.
+    pub fn from_pcm_id(pcm_id: &str) -> Self {
+        Device {
+            name: pcm_id.to_owned(),
+            pcm_id: pcm_id.to_owned(),
+            handles: Arc::new(Mutex::new(Default::default())),
+        }
+    }
+
     fn build_stream_inner(
         &self,
         conf: &StreamConfig,
