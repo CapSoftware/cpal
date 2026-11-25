@@ -883,7 +883,12 @@ fn stream_timestamp(
     match creation_instant {
         None => {
             let trigger_ts = status.get_trigger_htstamp();
-            let ts = status.get_htstamp();
+            let mut ts = status.get_htstamp();
+            // Some devices report a zero timestamp for a running stream (an
+            // HDA card through plughw): read the clock the timestamps use.
+            if ts.tv_sec == 0 && ts.tv_nsec == 0 {
+                unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_RAW, &mut ts) };
+            }
             let nanos = timespec_diff_nanos(ts, trigger_ts);
             if nanos < 0 {
                 let description = format!(
