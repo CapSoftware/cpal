@@ -275,7 +275,7 @@ impl Device {
             Ok(handle) => handle,
         };
         let can_pause = set_hw_params_from_format(&handle, conf, sample_format)?;
-        let period_len = set_sw_params_from_format(&handle, conf, stream_type)?;
+        let (period_len, tstamp_clock) = set_sw_params_from_format(&handle, conf, stream_type)?;
 
         handle.prepare()?;
 
@@ -306,6 +306,7 @@ impl Device {
             period_len,
             can_pause,
             creation_instant,
+            tstamp_clock,
         };
 
         Ok(stream_inner)
@@ -544,6 +545,9 @@ struct StreamInner {
     // If this field is `None` then the elapsed duration between `get_trigger_htstamp` and
     // `get_htstamp` is used.
     creation_instant: Option<std::time::Instant>,
+
+    // The clock the stream's timestamps are taken from (the tstamp_type set in the sw params).
+    tstamp_clock: libc::clockid_t,
 }
 
 // Assume that the ALSA library is built with thread safe option.
@@ -806,7 +810,7 @@ fn process_input(
     let data = buffer.as_mut_ptr() as *mut ();
     let len = buffer.len() / sample_format.sample_size();
     let data = unsafe { Data::from_parts(data, len, sample_format) };
-    let callback = stream_timestamp(&status, stream.creation_instant)?;
+    let callback = stream_timestamp(&status, stream.creation_instant, stream.tstamp_clock)?;
     let delay_duration = frames_to_duration(delay_frames, stream.conf.sample_rate);
     let capture = callback
         .sub(delay_duration)
@@ -836,7 +840,7 @@ fn process_output(
         let data = buffer.as_mut_ptr() as *mut ();
         let len = buffer.len() / sample_format.sample_size();
         let mut data = unsafe { Data::from_parts(data, len, sample_format) };
-        let callback = stream_timestamp(&status, stream.creation_instant)?;
+        let callback = stream_timestamp(&status, stream.creation_instant, stream.tstamp_clock)?;
         let delay_duration = frames_to_duration(delay_frames, stream.conf.sample_rate);
         let playback = callback
             .add(delay_duration)
@@ -879,15 +883,16 @@ fn process_output(
 fn stream_timestamp(
     status: &alsa::pcm::Status,
     creation_instant: Option<std::time::Instant>,
+    tstamp_clock: libc::clockid_t,
 ) -> Result<crate::StreamInstant, BackendSpecificError> {
     match creation_instant {
         None => {
             let trigger_ts = status.get_trigger_htstamp();
             let mut ts = status.get_htstamp();
             // Some devices report a zero timestamp for a running stream (an
-            // HDA card through plughw): read the clock the timestamps use.
+            // HDA card through plughw): read the clock the trigger timestamp uses.
             if ts.tv_sec == 0 && ts.tv_nsec == 0 {
-                unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_RAW, &mut ts) };
+                unsafe { libc::clock_gettime(tstamp_clock, &mut ts) };
             }
             let nanos = timespec_diff_nanos(ts, trigger_ts);
             if nanos < 0 {
@@ -1105,7 +1110,7 @@ fn set_sw_params_from_format(
     pcm_handle: &alsa::pcm::PCM,
     config: &StreamConfig,
     stream_type: alsa::Direction,
-) -> Result<usize, BackendSpecificError> {
+) -> Result<(usize, libc::clockid_t), BackendSpecificError> {
     let sw_params = pcm_handle.sw_params_current()?;
 
     let period_len = {
@@ -1137,12 +1142,14 @@ fn set_sw_params_from_format(
     // tstamp_type param cannot be changed after the device is opened.
     // The default tstamp_type value on most Linux systems is "monotonic",
     // let's try to use it if setting the tstamp_type fails.
+    let mut tstamp_clock = libc::CLOCK_MONOTONIC_RAW;
     if pcm_handle.sw_params(&sw_params).is_err() {
         sw_params.set_tstamp_type(alsa::pcm::TstampType::Monotonic)?;
         pcm_handle.sw_params(&sw_params)?;
+        tstamp_clock = libc::CLOCK_MONOTONIC;
     }
 
-    Ok(period_len)
+    Ok((period_len, tstamp_clock))
 }
 
 impl From<alsa::Error> for BackendSpecificError {
